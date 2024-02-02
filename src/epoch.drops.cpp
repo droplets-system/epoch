@@ -1,4 +1,4 @@
-#include "oracle.drops/oracle.drops.hpp"
+#include "epoch.drops/epoch.drops.hpp"
 
 namespace dropssystem {
 
@@ -195,7 +195,8 @@ void oracle::ensure_epoch_advance(drops::state_row state)
       });
    }
 
-   // TODO: Create an administrative action that can force an Epoch completed if an oracle fails to reveal.
+   // TODO: Create an administrative action that can force an Epoch completed if
+   // an oracle fails to reveal.
 }
 
 [[eosio::action]] void oracle::finishreveal(uint64_t epoch)
@@ -248,7 +249,8 @@ void oracle::ensure_epoch_advance(drops::state_row state)
 [[eosio::action]] void oracle::subscribe(name subscriber)
 {
    // TODO: Maybe this needs to require the oracles or _self?
-   // The person advancing I think needs to pay for the CPU to notify the other contracts
+   // The person advancing I think needs to pay for the CPU to notify the other
+   // contracts
    require_auth(_self);
 
    oracle::subscriber_table subscribers(_self, _self.value);
