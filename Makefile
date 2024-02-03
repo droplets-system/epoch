@@ -3,7 +3,7 @@ TEST_FILES := $(shell find src -name '*.ts')
 BIN := ./node_modules/.bin
 
 build: | build/dir
-	cdt-cpp -abigen -abigen_output=build/epoch.drops.abi -o build/epoch.drops.wasm src/epoch.drops.cpp -R src -I include -I ../drops/include -D DEBUG
+	cdt-cpp -abigen -abigen_output=build/epoch.drops.abi -o build/epoch.drops.wasm src/epoch.drops.cpp -R src -I include -D DEBUG
 
 build/dir:
 	mkdir -p build
@@ -20,8 +20,16 @@ init/codegen: codegen/dir codegen/eosio.ts codegen/eosio.token.ts
 build/epoch.drops.ts: 
 	npx @wharfkit/cli generate --json ./build/epoch.drops.abi --file ./build/epoch.drops.ts drops
 
+codegen: codegen/clean codegen/dir codegen/drops.ts codegen/eosio.ts codegen/eosio.token.ts
+
+codegen/clean:
+	rm -rf codegen
+
 codegen/dir:
 	mkdir -p codegen
+
+codegen/drops.ts:
+	npx @wharfkit/cli generate --json ../drops/build/drops.abi --file ./codegen/drops.ts drops
 
 codegen/eosio.ts:
 	npx @wharfkit/cli generate --url https://jungle4.greymass.com --file ./codegen/eosio.ts eosio

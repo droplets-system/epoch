@@ -1,14 +1,19 @@
 #pragma once
 
+#include <cmath>
 #include <drops/drops.hpp>
 #include <eosio.system/eosio.system.hpp>
 
 using namespace eosio;
 using namespace std;
 
+static constexpr name drops_contract = "seed.gm"_n; // location of drops contract
+
+static const string ERROR_SYSTEM_DISABLED = "Drops system is disabled.";
+
 namespace dropssystem {
 
-class [[eosio::contract("oracle.drops")]] oracle : public contract
+class [[eosio::contract("epoch.drops")]] epoch : public contract
 {
 public:
    using contract::contract;
@@ -51,6 +56,13 @@ public:
       uint128_t by_epochoracle() const { return ((uint128_t)oracle.value << 64) | epoch; }
    };
 
+   struct [[eosio::table("state")]] state_row
+   {
+      block_timestamp genesis     = current_block_time();
+      uint32_t        epochlength = 86400; // Epoch duration, 1-day default
+      bool            enabled     = false;
+   };
+
    struct [[eosio::table("subscriber")]] subscriber_row
    {
       name     subscriber;
@@ -69,7 +81,8 @@ public:
       commit_row,
       eosio::indexed_by<"epoch"_n, eosio::const_mem_fun<commit_row, uint64_t, &commit_row::by_epoch>>,
       eosio::indexed_by<"epochoracle"_n, eosio::const_mem_fun<commit_row, uint128_t, &commit_row::by_epochoracle>>>
-      commit_table;
+                                                  commit_table;
+   typedef eosio::singleton<"state"_n, state_row> state_table;
    typedef eosio::multi_index<
       "reveal"_n,
       reveal_row,
@@ -81,19 +94,19 @@ public:
     Oracle actions
    */
    [[eosio::action]] void commit(name oracle, uint64_t epoch, checksum256 commit);
-   using commit_action = eosio::action_wrapper<"commit"_n, &oracle::commit>;
+   using commit_action = eosio::action_wrapper<"commit"_n, &epoch::commit>;
 
-   [[eosio::action]] void reveal(name oracle, uint64_t epoch, string reveal);
-   using reveal_action = eosio::action_wrapper<"reveal"_n, &oracle::reveal>;
+   //    [[eosio::action]] void reveal(name oracle, uint64_t epoch, string reveal);
+   //    using reveal_action = eosio::action_wrapper<"reveal"_n, &epoch::reveal>;
 
-   [[eosio::action]] void finishreveal(uint64_t epoch);
-   using finishreveal_action = eosio::action_wrapper<"finishreveal"_n, &oracle::finishreveal>;
+   //    [[eosio::action]] void finishreveal(uint64_t epoch);
+   //    using finishreveal_action = eosio::action_wrapper<"finishreveal"_n, &epoch::finishreveal>;
 
-   [[eosio::action]] void subscribe(name subscriber);
-   using subscribe_action = eosio::action_wrapper<"subscribe"_n, &oracle::subscribe>;
+   //    [[eosio::action]] void subscribe(name subscriber);
+   //    using subscribe_action = eosio::action_wrapper<"subscribe"_n, &epoch::subscribe>;
 
-   [[eosio::action]] void unsubscribe(name subscriber);
-   using unsubscribe_action = eosio::action_wrapper<"unsubscribe"_n, &oracle::unsubscribe>;
+   //    [[eosio::action]] void unsubscribe(name subscriber);
+   //    using unsubscribe_action = eosio::action_wrapper<"unsubscribe"_n, &epoch::unsubscribe>;
 
    /*
 
@@ -101,16 +114,22 @@ public:
 
    */
    [[eosio::action]] void addoracle(name oracle);
-   using addoracle_action = eosio::action_wrapper<"addoracle"_n, &oracle::addoracle>;
+   using addoracle_action = eosio::action_wrapper<"addoracle"_n, &epoch::addoracle>;
 
    [[eosio::action]] void removeoracle(name oracle);
-   using removeoracle_action = eosio::action_wrapper<"removeoracle"_n, &oracle::removeoracle>;
+   using removeoracle_action = eosio::action_wrapper<"removeoracle"_n, &epoch::removeoracle>;
 
    [[eosio::action]] void init();
-   using init_action = eosio::action_wrapper<"init"_n, &oracle::init>;
+   using init_action = eosio::action_wrapper<"init"_n, &epoch::init>;
 
-   [[eosio::action]] epoch_row advance();
-   using advance_action = eosio::action_wrapper<"advance"_n, &oracle::advance>;
+   [[eosio::action]] void enable(const bool enabled);
+   using enable_action = eosio::action_wrapper<"enable"_n, &epoch::enable>;
+
+   [[eosio::action]] void epochlength(const uint32_t epochlength);
+   using epochlength_action = eosio::action_wrapper<"epochlength"_n, &epoch::epochlength>;
+
+   //    [[eosio::action]] epoch_row advance();
+   //    using advance_action = eosio::action_wrapper<"advance"_n, &epoch::advance>;
 
    /*
 
@@ -118,27 +137,39 @@ public:
 
    */
    [[eosio::action]] void wipe();
-   using wipe_action = eosio::action_wrapper<"wipe"_n, &oracle::wipe>;
+   using wipe_action = eosio::action_wrapper<"wipe"_n, &epoch::wipe>;
+
+   // 1706486401 -
+   // 1706486400
+   // / 86400
+   // (1706486401 - 1706486400) / 86400
 
    /*
 
     Computation helpers
 
    */
-   [[eosio::action]] checksum256 computeepoch(uint64_t epoch);
-   using computeepoch_action = eosio::action_wrapper<"computeepoch"_n, &oracle::computeepoch>;
+   //    [[eosio::action]] checksum256 computeepoch(uint64_t epoch);
+   //    using computeepoch_action = eosio::action_wrapper<"computeepoch"_n, &epoch::computeepoch>;
 
-   [[eosio::action]] checksum256 computedrops(uint64_t epoch, uint64_t drops);
-   using computedrops_action = eosio::action_wrapper<"computedrops"_n, &oracle::computedrops>;
+   //    [[eosio::action]] checksum256 computedrops(uint64_t epoch, uint64_t drops);
+   //    using computedrops_action = eosio::action_wrapper<"computedrops"_n, &epoch::computedrops>;
 
-   [[eosio::action]] checksum256 cmplastepoch(uint64_t drops, name contract);
-   using cmplastepoch_action = eosio::action_wrapper<"cmplastepoch"_n, &oracle::cmplastepoch>;
+   //    [[eosio::action]] checksum256 cmplastepoch(uint64_t drops, name contract);
+   //    using cmplastepoch_action = eosio::action_wrapper<"cmplastepoch"_n, &epoch::cmplastepoch>;
 
-   checksum256 compute_epoch_value(uint64_t epoch);
-   checksum256 compute_epoch_drops_value(uint64_t epoch, uint64_t drops);
-   checksum256 compute_last_epoch_drops_value(uint64_t drops);
+   //    checksum256 compute_epoch_value(uint64_t epoch);
+   //    checksum256 compute_epoch_drops_value(uint64_t epoch, uint64_t drops);
+   //    checksum256 compute_last_epoch_drops_value(uint64_t drops);
 
    static constexpr char hexmap[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+
+   static uint64_t derive_epoch(const block_timestamp genesis, const uint32_t epochlength)
+   {
+      return std::floor((current_time_point().sec_since_epoch() - genesis.to_time_point().sec_since_epoch()) /
+                        epochlength) +
+             1;
+   }
 
    static std::string hexStr(unsigned char* data, int len)
    {
@@ -192,9 +223,26 @@ public:
       return sha256(result.c_str(), result.length());
    }
 
+// DEBUG (used to help testing)
+#ifdef DEBUG
+   [[eosio::action]] void test(const string data);
+
+   // @debug
+   [[eosio::action]] void
+   cleartable(const name table_name, const optional<name> scope, const optional<uint64_t> max_rows);
+#endif
+
 private:
-   oracle::epoch_row advance_epoch();
-   void              ensure_epoch_advance(drops::state_row state);
+   void check_is_enabled();
+
+   epoch::epoch_row advance_epoch();
+   void             ensure_epoch_advance(epoch::state_row state);
+
+// DEBUG (used to help testing)
+#ifdef DEBUG
+   template <typename T>
+   void clear_table(T& table, uint64_t rows_to_clear);
+#endif
 };
 
 } // namespace dropssystem
