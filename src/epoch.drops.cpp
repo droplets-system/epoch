@@ -154,16 +154,14 @@ epoch::epoch_row epoch::advance_epoch()
    const vector<name> oracles = get_active_oracles();
 
    epochs.emplace(get_self(), [&](auto& row) {
-      row.epoch     = current_epoch_height;
-      row.oracles   = oracles;
-      row.completed = 0;
+      row.epoch   = current_epoch_height;
+      row.oracles = oracles;
    });
 
    // Return the next epoch
    return {
       current_epoch_height, // epoch
       oracles,              // oracles
-      0                     // completed
    };
 }
 
@@ -234,10 +232,7 @@ void epoch::ensure_epoch_reveal(const uint64_t epoch)
       // Generate the sha256 value of the combined string
       const auto epoch_seed = sha256(result.c_str(), result.length());
 
-      _epoch.modify(epoch_itr, get_self(), [&](auto& row) {
-         row.completed = 1;
-         row.seed      = epoch_seed;
-      });
+      _epoch.modify(epoch_itr, get_self(), [&](auto& row) { row.seed = epoch_seed; });
    }
 }
 
@@ -286,9 +281,8 @@ void epoch::ensure_epoch_reveal(const uint64_t epoch)
    // Add the initial epoch row to the oracle contract
    epoch::epoch_table epochs(get_self(), get_self().value);
    epochs.emplace(get_self(), [&](auto& row) {
-      row.epoch     = 1;
-      row.oracles   = oracles;
-      row.completed = 0;
+      row.epoch   = 1;
+      row.oracles = oracles;
    });
 }
 

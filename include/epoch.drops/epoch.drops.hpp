@@ -33,10 +33,8 @@ public:
    {
       uint64_t     epoch;
       vector<name> oracles;
-      uint64_t     completed;
       checksum256  seed;
       uint64_t     primary_key() const { return epoch; }
-      uint64_t     by_completed() const { return completed; }
    };
 
    struct [[eosio::table("oracle")]] oracle_row
@@ -63,11 +61,7 @@ public:
       bool            enabled  = false;
    };
 
-   typedef eosio::multi_index<
-      "epoch"_n,
-      epoch_row,
-      eosio::indexed_by<"completed"_n, eosio::const_mem_fun<epoch_row, uint64_t, &epoch_row::by_completed>>>
-      epoch_table;
+   typedef eosio::multi_index<"epoch"_n, epoch_row> epoch_table;
    typedef eosio::multi_index<
       "commit"_n,
       commit_row,
