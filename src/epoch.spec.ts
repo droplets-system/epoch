@@ -71,9 +71,14 @@ function getEpochs(): EpochContract.Types.epoch_row[] {
     return rows.map((row) => EpochContract.Types.epoch_row.from(row))
 }
 
-function getCommits(): EpochContract.Types.epoch_row[] {
+function getCommits(): EpochContract.Types.commit_row[] {
     const rows = contracts.epoch.tables.commit().getTableRows()
     return rows.map((row) => EpochContract.Types.commit_row.from(row))
+}
+
+function getReveals(): EpochContract.Types.reveal_row[] {
+    const rows = contracts.epoch.tables.reveal().getTableRows()
+    return rows.map((row) => EpochContract.Types.reveal_row.from(row))
 }
 
 // function getDrop(seed: bigint): DropsContract.Types.drop_row {
@@ -109,9 +114,14 @@ function getOracles(): EpochContract.Types.oracle_row[] {
 // const ERROR_SYSTEM_DISABLED = 'eosio_assert_message: Drops system is disabled.'
 
 const datetime = new Date('2024-01-29T00:00:00.000')
+function advanceTime(seconds: number) {
+    const newDate = new Date(datetime.getTime() + seconds * 1000)
+    blockchain.setTime(TimePointSec.from(newDate))
+}
+
 const defaultState = {
     genesis: BlockTimestamp.from(datetime),
-    epochlength: 86400,
+    duration: 86400,
     enabled: false,
 }
 
@@ -156,28 +166,30 @@ describe(core_contract, () => {
         })
     })
 
-    test('epochlength', async () => {
-        await contracts.epoch.actions.epochlength([888888]).send()
+    test('duration', async () => {
+        await contracts.epoch.actions.duration([888888]).send()
         expect(getState()).toBeStruct({
             ...defaultState,
-            epochlength: 888888,
+            duration: 888888,
         })
     })
 
-    test('addoracle', async () => {
-        await contracts.epoch.actions.addoracle([alice]).send()
-        const rows = getOracles()
-        expect(rows.length).toBe(1)
-        expect(rows[0]).toBeStruct({oracle: 'alice'})
-    })
+    describe('oracle', () => {
+        test('addoracle', async () => {
+            await contracts.epoch.actions.addoracle([alice]).send()
+            const rows = getOracles()
+            expect(rows.length).toBe(1)
+            expect(rows[0]).toBeStruct({oracle: 'alice'})
+        })
 
-    test('removeoracle', async () => {
-        await contracts.epoch.actions.addoracle([alice]).send()
-        const beforeRemove = getOracles()
-        expect(beforeRemove.length).toBe(1)
-        await contracts.epoch.actions.removeoracle([alice]).send()
-        const afterRemove = getOracles()
-        expect(afterRemove.length).toBe(0)
+        test('removeoracle', async () => {
+            await contracts.epoch.actions.addoracle([alice]).send()
+            const beforeRemove = getOracles()
+            expect(beforeRemove.length).toBe(1)
+            await contracts.epoch.actions.removeoracle([alice]).send()
+            const afterRemove = getOracles()
+            expect(afterRemove.length).toBe(0)
+        })
     })
 
     describe('commit', () => {
@@ -203,8 +215,7 @@ describe(core_contract, () => {
             const epochs = getEpochs()
             expect(epochs.length).toBe(1)
 
-            const tomorrow = new Date(datetime.getTime() + 86400 * 1000)
-            blockchain.setTime(TimePointSec.from(tomorrow))
+            advanceTime(86400)
 
             await contracts.epoch.actions.commit([alice, 2, mockCommit]).send(alice)
             const epochsTomorrow = getEpochs()
@@ -227,7 +238,7 @@ describe(core_contract, () => {
             test('not in epoch', async () => {
                 const action = contracts.epoch.actions.commit([bob, 1, mockCommit]).send(bob)
                 expect(action).rejects.toThrow(
-                    'eosio_assert: Oracle is not in the list of oracles for this epoch'
+                    'eosio_assert_message: Oracle is not in the list of oracles for Epoch 1.'
                 )
             })
             test('invalid auth', async () => {
@@ -237,16 +248,126 @@ describe(core_contract, () => {
             test('invalid epoch', async () => {
                 const action = contracts.epoch.actions.commit([alice, 2, mockCommit]).send(alice)
                 expect(action).rejects.toThrow(
-                    'eosio_assert: Epoch does not exist in oracle contract'
+                    'eosio_assert_message: Epoch submitted (2) is not the current epoch (1).'
+                )
+            })
+            test('cannot commit to epoch which has ended', async () => {
+                advanceTime(86400)
+                const action = contracts.epoch.actions.commit([alice, 1, mockCommit]).send(alice)
+                expect(action).rejects.toThrow(
+                    'eosio_assert_message: Epoch submitted (1) is not the current epoch (2).'
                 )
             })
             test('cannot advance with no oracles', async () => {
                 await contracts.epoch.actions.commit([alice, 1, mockCommit]).send(alice)
                 await contracts.epoch.actions.removeoracle([alice]).send()
-                const tomorrow = new Date(datetime.getTime() + 86400 * 1000)
-                blockchain.setTime(TimePointSec.from(tomorrow))
+                advanceTime(86400)
                 const action = contracts.epoch.actions.commit([alice, 2, mockCommit]).send(alice)
-                expect(action).rejects.toThrow('eosio_assert: No active oracles - cannot advance.')
+                expect(action).rejects.toThrow('eosio_assert: No active oracles')
+            })
+        })
+    })
+
+    describe('reveal', () => {
+        beforeEach(async () => {
+            await contracts.epoch.actions.addoracle([alice]).send()
+            await contracts.epoch.actions.init().send()
+        })
+        test('success', async () => {
+            await contracts.epoch.actions.commit([alice, 1, mockCommit]).send(alice)
+
+            advanceTime(86400)
+
+            await contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(alice)
+
+            const reveals = getReveals()
+            expect(reveals.length).toBe(1)
+
+            const epoch = getEpoch(1n)
+            expect(
+                epoch.seed.equals(
+                    'aa64858f9aef574443d0595ef57665d4252475b3f9a5a484c40654401a4116e5'
+                )
+            ).toBeTrue()
+        })
+        test('does not reveal until all oracles submit', async () => {
+            // reinitialize with two oracles
+            await contracts.epoch.actions.wipe().send()
+            await contracts.epoch.actions.addoracle([alice]).send()
+            await contracts.epoch.actions.addoracle([bob]).send()
+            await contracts.epoch.actions.init().send()
+
+            await contracts.epoch.actions.commit([alice, 1, mockCommit]).send(alice)
+            await contracts.epoch.actions.commit([bob, 1, mockCommit]).send(bob)
+
+            advanceTime(86400)
+
+            await contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(alice)
+
+            const reveals = getReveals()
+            expect(reveals.length).toBe(1)
+
+            const epoch = getEpoch(1n)
+            expect(epoch.completed.equals(0)).toBeTrue()
+            expect(
+                epoch.seed.equals(
+                    '0000000000000000000000000000000000000000000000000000000000000000'
+                )
+            ).toBeTrue()
+
+            await contracts.epoch.actions.reveal([bob, 1, mockReveal]).send(bob)
+
+            const revealsAfter = getReveals()
+            expect(revealsAfter.length).toBe(2)
+
+            const epochAfter = getEpoch(1n)
+            expect(epochAfter.completed.equals(1)).toBeTrue()
+            expect(
+                epochAfter.seed.equals(
+                    '2202d9f6ff083b8061e9741c7a03392ded42acbfc563ef1ad400386af8f38ff5'
+                )
+            ).toBeTrue()
+        })
+
+        describe('errors', () => {
+            test('disabled', async () => {
+                await contracts.epoch.actions.enable([false]).send()
+                const action = contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(alice)
+                expect(action).rejects.toThrow('eosio_assert_message: Drops system is disabled.')
+            })
+            test('reveal does not match commit', async () => {
+                await contracts.epoch.actions.commit([alice, 1, mockCommit]).send(alice)
+                advanceTime(86400)
+                const action = contracts.epoch.actions.reveal([alice, 1, 'foo']).send(alice)
+                expect(action).rejects.toThrow(
+                    "eosio_assert_message: Reveal value 'foo' hashes to '2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae' which does not match commit value '3d1f01d81f9d605b2da582fbf5a4110ef35477caf7f2c5ae4fa0e3877ed16747'."
+                )
+            })
+            test('epoch has not ended', async () => {
+                await contracts.epoch.actions.commit([alice, 1, mockCommit]).send(alice)
+                const action = contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(alice)
+                expect(action).rejects.toThrow('eosio_assert_message: Epoch (1) has not completed.')
+            })
+            test('oracle already revealed', async () => {
+                await contracts.epoch.actions.commit([alice, 1, mockCommit]).send(alice)
+                advanceTime(86400)
+                await contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(alice)
+                const action = contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(alice)
+                expect(action).rejects.toThrow('eosio_assert: Oracle has already revealed')
+            })
+            test('epoch doesnt exist', async () => {
+                const action = contracts.epoch.actions.reveal([alice, 10, mockReveal]).send(alice)
+                expect(action).rejects.toThrow('eosio_assert_message: Epoch 10 does not exist.')
+            })
+            test('oracle not included in epoch', async () => {
+                const action = contracts.epoch.actions.reveal([bob, 1, mockReveal]).send(bob)
+                expect(action).rejects.toThrow(
+                    'eosio_assert_message: Oracle is not in the list of oracles for Epoch 1.'
+                )
+            })
+            test('invalid auth', async () => {
+                const action = contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(bob)
+                expect(action).rejects.toThrow('missing required authority alice')
             })
         })
     })
@@ -260,8 +381,8 @@ describe(core_contract, () => {
             const action = contracts.epoch.actions.enable([true]).send(alice)
             expect(action).rejects.toThrow('missing required authority epoch.drops')
         })
-        test('epochlength', async () => {
-            const action = contracts.epoch.actions.epochlength([888888]).send(alice)
+        test('duration', async () => {
+            const action = contracts.epoch.actions.duration([888888]).send(alice)
             expect(action).rejects.toThrow('missing required authority epoch.drops')
         })
         test('removeoracle', async () => {
@@ -269,221 +390,4 @@ describe(core_contract, () => {
             expect(action).rejects.toThrow('missing required authority epoch.drops')
         })
     })
-
-    // test('on_transfer', async () => {
-    //     const before = getBalance(alice)
-    //     await contracts.token.actions
-    //         .transfer([alice, core_contract, '10.0000 EOS', '10,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'])
-    //         .send(alice)
-    //     const after = getBalance(alice)
-
-    //     expect(after.units.value - before.units.value).toBe(-5847)
-    //     expect(getDrops(alice).length).toBe(10)
-    //     expect(
-    //         getDrop(6530728038117924388n).equals({
-    //             seed: '6530728038117924388',
-    //             owner: 'alice',
-    //             created: '2024-01-29T00:00:00.000',
-    //             bound: false,
-    //         })
-    //     ).toBeTrue()
-    // })
-
-    // test('on_transfer::error - contract disabled', async () => {
-    //     await contracts.core.actions.enable([false]).send()
-    //     const action = contracts.token.actions
-    //         .transfer([alice, core_contract, '10.0000 EOS', '10,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'])
-    //         .send(alice)
-    //     expect(action).rejects.toThrow(ERROR_SYSTEM_DISABLED)
-    // })
-
-    // test('on_transfer::error - empty memo', async () => {
-    //     const action = contracts.token.actions
-    //         .transfer([alice, core_contract, '10.0000 EOS', ''])
-    //         .send(alice)
-    //     expect(action).rejects.toThrow(ERROR_INVALID_MEMO)
-    // })
-
-    // test('on_transfer::error - invalid number', async () => {
-    //     const action = contracts.token.actions
-    //         .transfer([alice, core_contract, '10.0000 EOS', 'foo,bar'])
-    //         .send(alice)
-    //     expect(action).rejects.toThrow('eosio_assert: invalid number format or overflow')
-    // })
-
-    // test('on_transfer::error - number underflow', async () => {
-    //     const action = contracts.token.actions
-    //         .transfer([alice, core_contract, '10.0000 EOS', '-1,bar'])
-    //         .send(alice)
-    //     expect(action).rejects.toThrow('eosio_assert: number underflow')
-    // })
-
-    // test('on_transfer::error - at least 32 characters', async () => {
-    //     const action = contracts.token.actions
-    //         .transfer([alice, core_contract, '10.0000 EOS', '1,foobar'])
-    //         .send(alice)
-    //     await expectToThrow(
-    //         action,
-    //         'eosio_assert: Drop data must be at least 32 characters in length.'
-    //     )
-    // })
-
-    // test('mint', async () => {
-    //     await contracts.core.actions.mint([bob, 1, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb']).send(bob)
-
-    //     expect(getDrops(bob).length).toBe(1)
-    //     expect(
-    //         getDrop(10272988527514872302n).equals({
-    //             seed: '10272988527514872302',
-    //             owner: 'bob',
-    //             created: '2024-01-29T00:00:00.000',
-    //             bound: true,
-    //         })
-    //     ).toBeTrue()
-    // })
-
-    // test('mint::error - already exists', async () => {
-    //     const action = contracts.core.actions
-    //         .mint([bob, 1, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'])
-    //         .send(bob)
-
-    //     await expectToThrow(
-    //         action,
-    //         'eosio_assert_message: Drop 10272988527514872302 already exists.'
-    //     )
-    // })
-
-    // test('mint 1K', async () => {
-    //     await contracts.core.actions.mint([bob, 1000, 'cccccccccccccccccccccccccccccccc']).send(bob)
-
-    //     expect(getDrops(bob).length).toBe(1001)
-    // })
-
-    // test('on_transfer::error - invalid contract', async () => {
-    //     const action = contracts.fake.actions
-    //         .transfer([alice, core_contract, '10.0000 EOS', '10,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'])
-    //         .send(alice)
-    //     await expectToThrow(
-    //         action,
-    //         'eosio_assert: Only the eosio.token contract may send tokens to this contract.'
-    //     )
-    // })
-
-    // test('destroy', async () => {
-    //     const before = getBalance(alice)
-    //     await contracts.core.actions
-    //         .destroy([alice, ['6530728038117924388', '8833355934996727321'], 'memo'])
-    //         .send(alice)
-    //     const after = getBalance(alice)
-    //     const transfer = TokenContract.Types.transfer.from(blockchain.actionTraces[2].decodedData)
-
-    //     expect(transfer.quantity.units.value.toNumber()).toBe(1157)
-    //     expect(transfer.memo).toBe('Reclaimed RAM value of 2 drops(s)')
-    //     expect(after.units.value - before.units.value).toBe(1157)
-    //     expect(getDrops(alice).length).toBe(8)
-    //     expect(() => getDrop(6530728038117924388n)).toThrow('Drop not found')
-    // })
-
-    // test('destroy::error - not found', async () => {
-    //     const action = contracts.core.actions.destroy([alice, ['123'], 'memo']).send(alice)
-    //     expect(action).rejects.toThrow('eosio_assert: Drop not found.')
-    // })
-
-    // test('destroy::error - must belong to owner', async () => {
-    //     const action = contracts.core.actions
-    //         .destroy([bob, ['17855725969634623351'], 'memo'])
-    //         .send(bob)
-    //     await expectToThrow(
-    //         action,
-    //         'eosio_assert_message: Drop 17855725969634623351 does not belong to account.'
-    //     )
-    // })
-
-    // test('destroy::error - missing required authority', async () => {
-    //     const action = contracts.core.actions
-    //         .destroy([bob, ['17855725969634623351'], 'memo'])
-    //         .send(alice)
-    //     expect(action).rejects.toThrow('missing required authority bob')
-    // })
-
-    // test('unbind', async () => {
-    //     const before = getBalance(bob)
-    //     expect(getDrop(10272988527514872302n).bound).toBeTruthy()
-    //     await contracts.core.actions.unbind([bob, ['10272988527514872302']]).send(bob)
-    //     await contracts.token.actions
-    //         .transfer([bob, core_contract, '10.0000 EOS', 'unbind'])
-    //         .send(bob)
-
-    //     // drop must now be unbound
-    //     expect(getDrop(10272988527514872302n).bound).toBeFalsy()
-    //     const after = getBalance(bob)
-
-    //     // EOS returned for excess RAM
-    //     expect(after.units.value - before.units.value).toBe(-583)
-    // })
-
-    // test('unbind::error - not found', async () => {
-    //     const action = contracts.core.actions.unbind([bob, ['123']]).send(bob)
-    //     expect(action).rejects.toThrow('eosio_assert: Drop not found.')
-    // })
-
-    // test('unbind::error - does not belong to account', async () => {
-    //     const action = contracts.core.actions.unbind([alice, ['10272988527514872302']]).send(alice)
-    //     await expectToThrow(
-    //         action,
-    //         'eosio_assert_message: Drop 10272988527514872302 does not belong to account.'
-    //     )
-    // })
-
-    // test('unbind::error - is not bound', async () => {
-    //     const action = contracts.core.actions.unbind([bob, ['10272988527514872302']]).send(bob)
-    //     expect(action).rejects.toThrow('eosio_assert_message: Drop 10272988527514872302 is not bound')
-    // })
-
-    // test('bind', async () => {
-    //     const before = getBalance(bob)
-    //     expect(getDrop(10272988527514872302n).bound).toBeFalsy()
-    //     await contracts.core.actions.bind([bob, ['10272988527514872302']]).send(bob)
-
-    //     // drop must now be unbound
-    //     expect(getDrop(10272988527514872302n).bound).toBeTruthy()
-    //     const after = getBalance(bob)
-
-    //     // EOS returned for excess RAM
-    //     expect(after.units.value - before.units.value).toBe(578)
-    // })
-
-    // test('bind::error - not found', async () => {
-    //     const action = contracts.core.actions.bind([bob, ['123']]).send(bob)
-    //     expect(action).rejects.toThrow('eosio_assert: Drop not found.')
-    // })
-
-    // test('bind::error - does not belong to account', async () => {
-    //     const action = contracts.core.actions.bind([alice, ['10272988527514872302']]).send(alice)
-    //     await expectToThrow(
-    //         action,
-    //         'eosio_assert_message: Drop 10272988527514872302 does not belong to account.'
-    //     )
-    // })
-
-    // test('bind::error - is not unbound', async () => {
-    //     const action = contracts.core.actions.bind([bob, ['10272988527514872302']]).send(bob)
-    //     await expectToThrow(
-    //         action,
-    //         'eosio_assert_message: Drop 10272988527514872302 is not unbound'
-    //     )
-    // })
-
-    // test('cancelunbind', async () => {
-    //     expect(getUnbind(bob).length).toBe(0)
-    //     await contracts.core.actions.unbind([bob, ['10272988527514872302']]).send(bob)
-    //     expect(getUnbind(bob).length).toBe(1)
-    //     await contracts.core.actions.cancelunbind([bob]).send(bob)
-    //     expect(getUnbind(bob).length).toBe(0)
-    // })
-
-    // test('cancelunbind::error - No unbind request', async () => {
-    //     const action = contracts.core.actions.cancelunbind([bob]).send(bob)
-    //     expect(action).rejects.toThrow('eosio_assert: No unbind request found for account.')
-    // })
 })

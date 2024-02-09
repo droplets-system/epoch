@@ -22,11 +22,23 @@ epoch::cleartable(const name table_name, const optional<name> scope, const optio
    const uint64_t value         = scope ? scope->value : get_self().value;
 
    // tables
-   epoch::state_table  _state(get_self(), value);
+   epoch::commit_table _commit(get_self(), value);
+   epoch::epoch_table  _epoch(get_self(), value);
    epoch::oracle_table _oracle(get_self(), value);
+   epoch::reveal_table _reveal(get_self(), value);
+   epoch::state_table  _state(get_self(), value);
+   //    epoch::subscriber_table _subscriber(get_self(), value);
 
-   if (table_name == "oracle"_n)
+   if (table_name == "commit"_n)
+      clear_table(_commit, rows_to_clear);
+   else if (table_name == "epoch"_n)
+      clear_table(_epoch, rows_to_clear);
+   else if (table_name == "oracle"_n)
       clear_table(_oracle, rows_to_clear);
+   else if (table_name == "reveal"_n)
+      clear_table(_reveal, rows_to_clear);
+   //    else if (table_name == "subscriber"_n)
+   //       clear_table(_subscriber, rows_to_clear);
    else if (table_name == "state"_n)
       _state.remove();
    else
