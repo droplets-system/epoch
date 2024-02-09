@@ -1,0 +1,11 @@
+build
+codegen
+node_modules
+*.wasm
+*.abi
+!include/**/*
+*.log
+.vscode
+package-lock.json
+bun.lockb
+yarn.lock
