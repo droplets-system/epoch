@@ -149,7 +149,6 @@ describe(core_contract, () => {
             epoch: 1n,
             seed: '0000000000000000000000000000000000000000000000000000000000000000',
             oracles: [alice],
-            completed: false,
         })
     })
 
@@ -308,7 +307,6 @@ describe(core_contract, () => {
             expect(reveals.length).toBe(1)
 
             const epoch = getEpoch(1n)
-            expect(epoch.completed.equals(0)).toBeTrue()
             expect(
                 epoch.seed.equals(
                     '0000000000000000000000000000000000000000000000000000000000000000'
@@ -321,7 +319,6 @@ describe(core_contract, () => {
             expect(revealsAfter.length).toBe(2)
 
             const epochAfter = getEpoch(1n)
-            expect(epochAfter.completed.equals(1)).toBeTrue()
             expect(
                 epochAfter.seed.equals(
                     '2202d9f6ff083b8061e9741c7a03392ded42acbfc563ef1ad400386af8f38ff5'
