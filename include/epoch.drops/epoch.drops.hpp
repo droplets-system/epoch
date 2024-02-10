@@ -119,6 +119,10 @@ public:
    [[eosio::action]] epoch_row advance();
    using advance_action = eosio::action_wrapper<"advance"_n, &epoch::advance>;
 
+   // Debug
+   [[eosio::action]] void checkepoch(const block_timestamp genesis, const uint32_t duration, const uint64_t epoch);
+   using checkepoch_action = eosio::action_wrapper<"checkepoch"_n, &epoch::checkepoch>;
+
    /*
     Computation helpers
    */
@@ -129,7 +133,14 @@ public:
       return floor((current_time_point().sec_since_epoch() - genesis.to_time_point().sec_since_epoch()) / duration) + 1;
    }
 
-   static string hexStr(const unsigned char* data, const int len)
+   static block_timestamp
+   derive_epoch_start(const block_timestamp& genesis, const uint32_t duration, const uint64_t epoch)
+   {
+      check(epoch > 0, "epoch must be greater than 0");
+      return block_timestamp(genesis.to_time_point() + seconds(duration * (epoch - 1)));
+   }
+
+   static string hex_to_str(const unsigned char* data, const int len)
    {
       string s(len * 2, ' ');
       for (int i = 0; i < len; ++i) {
@@ -139,7 +150,30 @@ public:
       return s;
    }
 
-   static uint16_t clz(const checksum256 checksum)
+   static string checksum256_to_string(const checksum256& checksum)
+   {
+      auto byte_array = checksum.extract_as_byte_array();
+      return hex_to_str(byte_array.data(), byte_array.size());
+   }
+
+   static uint16_t clzhex(const std::string& hexString)
+   {
+      int  count        = 0;
+      bool foundNonZero = false;
+
+      for (char c : hexString) {
+         if (c == '0' && !foundNonZero) {
+            count++;
+         } else {
+            foundNonZero = true;
+            break;
+         }
+      }
+
+      return count;
+   }
+
+   static uint16_t clzbinary(const checksum256 checksum)
    {
       auto                 byte_array    = checksum.extract_as_byte_array();
       const uint8_t*       my_bytes      = (uint8_t*)byte_array.data();
@@ -171,14 +205,24 @@ public:
       return lzbits;
    }
 
-   static checksum256 hash(const checksum256 epochdrops, const uint64_t drops)
+   static checksum256 hash(const checksum256 epochseed, const string data)
    {
-      // Combine the epoch drops and drops into a single string
-      auto   epoch_arr = epochdrops.extract_as_byte_array();
-      string result    = hexStr(epoch_arr.data(), epoch_arr.size()) + to_string(drops);
-
-      // Generate the sha256 value of the combined string
+      string result = checksum256_to_string(epochseed) + data;
       return sha256(result.c_str(), result.length());
+   }
+
+   static checksum256 hashdrop(const checksum256 epochseed, const uint64_t drops_id)
+   {
+      return hash(epochseed, to_string(drops_id));
+   }
+
+   static checksum256 hashdrops(const checksum256 epochseed, const vector<uint64_t> drops_ids)
+   {
+      string data = "";
+      for (const auto& id : drops_ids)
+         data += to_string(id);
+
+      return hash(epochseed, data);
    }
 
 // DEBUG (used to help testing)
