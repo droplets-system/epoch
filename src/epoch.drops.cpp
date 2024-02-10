@@ -99,7 +99,7 @@ bool epoch::oracle_has_revealed(const name oracle, const uint64_t epoch)
 void epoch::emplace_commit(const uint64_t epoch, const name oracle, const checksum256 commit)
 {
    epoch::commit_table commits(get_self(), get_self().value);
-   commits.emplace(get_self(), [&](auto& row) {
+   commits.emplace(oracle, [&](auto& row) {
       row.id     = commits.available_primary_key();
       row.epoch  = epoch;
       row.oracle = oracle;
@@ -110,7 +110,7 @@ void epoch::emplace_commit(const uint64_t epoch, const name oracle, const checks
 void epoch::emplace_reveal(const uint64_t epoch, const name oracle, const string reveal)
 {
    epoch::reveal_table reveals(get_self(), get_self().value);
-   reveals.emplace(get_self(), [&](auto& row) {
+   reveals.emplace(oracle, [&](auto& row) {
       row.id     = reveals.available_primary_key();
       row.epoch  = epoch;
       row.oracle = oracle;
@@ -195,6 +195,34 @@ epoch::commit_row epoch::get_commit(const name oracle, const uint64_t epoch)
    return *commit_itr;
 }
 
+void epoch::remove_oracle_commit(const uint64_t epoch, const name oracle)
+{
+   epoch::commit_table _commits(get_self(), get_self().value);
+   auto                commit_idx = _commits.get_index<"epochoracle"_n>();
+   auto                commit_itr = commit_idx.find(((uint128_t)oracle.value << 64) + epoch);
+   if (commit_itr != commit_idx.end()) {
+      commit_idx.erase(commit_itr);
+   }
+}
+
+void epoch::remove_oracle_reveal(const uint64_t epoch, const name oracle)
+{
+   epoch::reveal_table _reveals(get_self(), get_self().value);
+   auto                reveal_idx = _reveals.get_index<"epochoracle"_n>();
+   auto                reveal_itr = reveal_idx.find(((uint128_t)oracle.value << 64) + epoch);
+   if (reveal_itr != reveal_idx.end()) {
+      reveal_idx.erase(reveal_itr);
+   }
+}
+
+void epoch::cleanup_epoch(const uint64_t epoch, const vector<name> oracles)
+{
+   for (const name oracle : oracles) {
+      remove_oracle_commit(epoch, oracle);
+      remove_oracle_reveal(epoch, oracle);
+   }
+}
+
 void epoch::ensure_epoch_reveal(const uint64_t epoch)
 {
    vector<name> oracles_revealed;
@@ -229,10 +257,11 @@ void epoch::ensure_epoch_reveal(const uint64_t epoch)
       for (const auto& reveal : reveals)
          result += reveal;
 
-      // Generate the sha256 value of the combined string
       const auto epoch_seed = sha256(result.c_str(), result.length());
-
       _epoch.modify(epoch_itr, get_self(), [&](auto& row) { row.seed = epoch_seed; });
+
+      // Cleanup the commits and reveals for the epoch
+      cleanup_epoch(epoch, oracles_revealed);
    }
 }
 

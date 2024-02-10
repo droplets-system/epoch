@@ -194,6 +194,9 @@ private:
    epoch::epoch_row advance_epoch();
    void             ensure_epoch_advance(const uint64_t epoch);
    void             ensure_epoch_reveal(const uint64_t epoch);
+   void             cleanup_epoch(const uint64_t epoch, const vector<name> oracles);
+   void             remove_oracle_commit(const uint64_t epoch, const name oracle);
+   void             remove_oracle_reveal(const uint64_t epoch, const name oracle);
    bool             oracle_has_committed(const name oracle, const uint64_t epoch);
    bool             oracle_has_revealed(const name oracle, const uint64_t epoch);
    vector<name>     get_active_oracles();
