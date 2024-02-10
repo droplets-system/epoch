@@ -44,14 +44,13 @@ namespace dropssystem {
 
    const commit_row  _commit     = get_commit(oracle, epoch);
    const checksum256 commit_hash = _commit.commit;
-   const auto        commit_arr  = commit_hash.extract_as_byte_array();
+   const string      commit_str  = checksum256_to_string(commit_hash);
 
    const checksum256 reveal_hash = sha256(reveal.c_str(), reveal.length());
-   const auto        reveal_arr  = reveal_hash.extract_as_byte_array();
+   const string      reveal_str  = checksum256_to_string(reveal_hash);
 
-   check(reveal_hash == commit_hash,
-         "Reveal value '" + reveal + "' hashes to '" + hexStr(reveal_arr.data(), reveal_arr.size()) +
-            "' which does not match commit value '" + hexStr(commit_arr.data(), commit_arr.size()) + "'.");
+   check(reveal_hash == commit_hash, "Reveal value '" + reveal + "' hashes to '" + reveal_str +
+                                        "' which does not match commit value '" + commit_str + "'.");
 
    emplace_reveal(epoch, oracle, reveal);
 
