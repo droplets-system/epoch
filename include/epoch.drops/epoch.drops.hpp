@@ -119,10 +119,6 @@ public:
    [[eosio::action]] epoch_row advance();
    using advance_action = eosio::action_wrapper<"advance"_n, &epoch::advance>;
 
-   // Debug
-   [[eosio::action]] void checkepoch(const block_timestamp genesis, const uint32_t duration, const uint64_t epoch);
-   using checkepoch_action = eosio::action_wrapper<"checkepoch"_n, &epoch::checkepoch>;
-
    /*
     Computation helpers
    */
