@@ -110,6 +110,11 @@ function getOracles(): EpochContract.Types.oracle_row[] {
         .map((row) => EpochContract.Types.oracle_row.from(row))
 }
 
+function revealHash(epoch: number, secrets: string[]) {
+    const combined = [epoch, ...secrets.sort()].join('')
+    return Checksum256.hash(Bytes.from(combined, 'utf8').array).hexString
+}
+
 // const ERROR_INVALID_MEMO = `eosio_assert_message: Invalid transfer memo. (ex: "<amount>,<data>")`
 // const ERROR_SYSTEM_DISABLED = 'eosio_assert_message: Drops system is disabled.'
 
@@ -135,6 +140,17 @@ describe(core_contract, () => {
     beforeEach(async () => {
         blockchain.setTime(TimePointSec.from(datetime))
         await contracts.epoch.actions.wipe().send()
+    })
+
+    test('hash function match', async () => {
+        const reveals = [
+            '6ebbcfd600cb99737f3329aa4545ad6bf1cc62a86d9aaaebf6cc197c49b7064e',
+            '764c433a1b07827415b263d47ff468bc0a6b35754c878176038cf8dd2fabc90b',
+            '4086e35e0554c61ae225e71fd84327902b3da16fd54aa0cc186a7b1bf56578ab',
+        ]
+        const expected = '7f1c43edefe38ea54d678f3341cc12a9673f8c4c78fa1cdf3203f751deb07239'
+        const actual = revealHash(146, reveals)
+        expect(expected).toBe(actual)
     })
 
     test('state::default', async () => {
@@ -350,11 +366,7 @@ describe(core_contract, () => {
             ).toBeTrue()
 
             const epoch2 = getEpoch(2n)
-            expect(
-                epoch2.seed.equals(
-                    '070765201e8ba81bc0b4dd9700110c35c451334f5af0a343e314f145db2851dd'
-                )
-            ).toBeTrue()
+            expect(epoch2.seed.equals(revealHash(2, [mockReveal, mockReveal]))).toBeTrue()
 
             const epoch3 = getEpoch(3n)
             expect(
@@ -392,11 +404,7 @@ describe(core_contract, () => {
             expect(revealsAfter.length).toBe(0)
 
             const epochAfter = getEpoch(1n)
-            expect(
-                epochAfter.seed.equals(
-                    '2202d9f6ff083b8061e9741c7a03392ded42acbfc563ef1ad400386af8f38ff5'
-                )
-            ).toBeTrue()
+            expect(epochAfter.seed.equals(revealHash(1, [mockReveal, mockReveal]))).toBeTrue()
         })
 
         describe('errors', () => {

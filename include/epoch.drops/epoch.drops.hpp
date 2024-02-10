@@ -86,6 +86,9 @@ public:
    [[eosio::action]] void reveal(const name oracle, const uint64_t epoch, const string reveal);
    using reveal_action = eosio::action_wrapper<"reveal"_n, &epoch::reveal>;
 
+   [[eosio::action, eosio::read_only]] checksum256 computehash(const uint64_t epoch, const vector<string> reveals);
+   using computehash_action = eosio::action_wrapper<"computehash"_n, &epoch::computehash>;
+
    [[eosio::action, eosio::read_only]] uint64_t getepoch();
    using getepoch_action = eosio::action_wrapper<"getepoch"_n, &epoch::getepoch>;
 
@@ -199,7 +202,9 @@ private:
    void             remove_oracle_reveal(const uint64_t epoch, const name oracle);
    bool             oracle_has_committed(const name oracle, const uint64_t epoch);
    bool             oracle_has_revealed(const name oracle, const uint64_t epoch);
+   void             modify_epoch_seed(const uint64_t epoch, const checksum256 epoch_seed);
    vector<name>     get_active_oracles();
+   vector<string>   get_epoch_reveals(const uint64_t epoch);
    uint64_t         get_current_epoch_height();
    epoch_row        get_epoch(const uint64_t epoch);
    reveal_row       get_reveal(const name oracle, const uint64_t epoch);

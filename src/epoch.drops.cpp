@@ -223,45 +223,57 @@ void epoch::cleanup_epoch(const uint64_t epoch, const vector<name> oracles)
    }
 }
 
-void epoch::ensure_epoch_reveal(const uint64_t epoch)
+vector<string> epoch::get_epoch_reveals(const uint64_t epoch)
 {
-   vector<name> oracles_revealed;
+   const epoch_row selected_epoch = get_epoch(epoch);
+   vector<string>  reveals;
 
-   epoch::epoch_table _epoch(get_self(), get_self().value);
-   const auto         epoch_itr = _epoch.find(epoch);
-   check(epoch_itr != _epoch.end(), "Epoch2 " + to_string(epoch) + " does not exist.");
+   const reveal_table _reveals(get_self(), get_self().value);
+   auto               idx       = _reveals.get_index<"epoch"_n>();
+   auto               itr_start = idx.lower_bound(epoch);
+   auto               itr_end   = idx.upper_bound(epoch);
 
-   const reveal_table reveals(get_self(), get_self().value);
-   auto               oracle_reveals = reveals.get_index<"epochoracle"_n>();
-   for (name oracle : epoch_itr->oracles) {
-      auto completed_reveals_itr = oracle_reveals.find(((uint128_t)oracle.value << 64) + epoch);
-      if (completed_reveals_itr != oracle_reveals.end()) {
-         oracles_revealed.push_back(oracle);
-      }
+   for (auto itr = idx.begin(); itr != idx.end(); itr++) {
+      if (itr->epoch != epoch)
+         continue;
+      reveals.push_back(itr->reveal);
    }
 
-   if (oracles_revealed.size() == epoch_itr->oracles.size()) {
+   return reveals;
+}
 
-      // Accumulator for all reveal values
-      vector<string> reveals;
-      for (const name oracle_name : oracles_revealed) {
-         const auto reveal = get_reveal(oracle_name, epoch);
-         reveals.push_back(reveal.reveal);
-      }
+[[eosio::action, eosio::read_only]] checksum256 epoch::computehash(const uint64_t epoch, const vector<string> reveals)
+{
+   // Sort the reveal values alphebetically for consistency
+   vector<string> sorted_reveals = reveals;
+   sort(sorted_reveals.begin(), sorted_reveals.end());
 
-      // Sort the reveal values alphebetically for consistency
-      sort(reveals.begin(), reveals.end());
+   // Combine the epoch, drops, and reveals into a single string
+   string result = to_string(epoch);
+   for (const auto& reveal : sorted_reveals)
+      result += reveal;
 
-      // Combine the epoch, drops, and reveals into a single string
-      string result = to_string(epoch);
-      for (const auto& reveal : reveals)
-         result += reveal;
+   return sha256(result.c_str(), result.length());
+}
 
-      const auto epoch_seed = sha256(result.c_str(), result.length());
-      _epoch.modify(epoch_itr, get_self(), [&](auto& row) { row.seed = epoch_seed; });
+void epoch::modify_epoch_seed(const uint64_t epoch, const checksum256 epoch_seed)
+{
+   epoch::epoch_table _epoch(get_self(), get_self().value);
+   auto&              epoch_row = _epoch.get(epoch, "Epoch not found");
+   _epoch.modify(epoch_row, get_self(), [&](auto& row) { row.seed = epoch_seed; });
+}
 
-      // Cleanup the commits and reveals for the epoch
-      cleanup_epoch(epoch, oracles_revealed);
+void epoch::ensure_epoch_reveal(const uint64_t epoch)
+{
+   const epoch_row      selected_epoch = get_epoch(epoch);
+   const vector<string> reveals        = get_epoch_reveals(epoch);
+
+   //    check(false, "epoch::ensure_epoch_reveal: " + to_string(reveals.size()) + " / " +
+   //                    to_string(selected_epoch.oracles.size()) + " reveals");
+   if (reveals.size() == selected_epoch.oracles.size()) {
+      const auto seed = computehash(epoch, reveals);
+      modify_epoch_seed(epoch, seed);
+      cleanup_epoch(epoch, selected_epoch.oracles);
    }
 }
 
