@@ -256,11 +256,14 @@ vector<string> epoch::get_epoch_reveals(const uint64_t epoch)
    return sha256(result.c_str(), result.length());
 }
 
-void epoch::modify_epoch_seed(const uint64_t epoch, const checksum256 epoch_seed)
+void epoch::complete_epoch(const uint64_t epoch, const checksum256 epoch_seed)
 {
    epoch::epoch_table _epoch(get_self(), get_self().value);
    auto&              epoch_row = _epoch.get(epoch, "Epoch not found");
-   _epoch.modify(epoch_row, get_self(), [&](auto& row) { row.seed = epoch_seed; });
+   _epoch.modify(epoch_row, get_self(), [&](auto& row) {
+      row.oracles = {};
+      row.seed    = epoch_seed;
+   });
 }
 
 void epoch::ensure_epoch_reveal(const uint64_t epoch)
@@ -272,7 +275,7 @@ void epoch::ensure_epoch_reveal(const uint64_t epoch)
    //                    to_string(selected_epoch.oracles.size()) + " reveals");
    if (reveals.size() == selected_epoch.oracles.size()) {
       const auto seed = computehash(epoch, reveals);
-      modify_epoch_seed(epoch, seed);
+      complete_epoch(epoch, seed);
       cleanup_epoch(epoch, selected_epoch.oracles);
    }
 }
