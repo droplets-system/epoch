@@ -456,6 +456,25 @@ describe(core_contract, () => {
         })
     })
 
+    describe('edge cases', () => {
+        test('reveals despite missing oracle', async () => {
+            await contracts.epoch.actions.addoracle([alice]).send()
+            await contracts.epoch.actions.addoracle([bob]).send()
+            await contracts.epoch.actions.init().send()
+
+            await contracts.epoch.actions.commit([alice, 1, mockCommit]).send(alice)
+            advanceTime(86400)
+            await contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(alice)
+
+            const epoch = getEpoch(1n)
+            expect(
+                epoch.seed.equals(
+                    'aa64858f9aef574443d0595ef57665d4252475b3f9a5a484c40654401a4116e5'
+                )
+            ).toBeTrue()
+        })
+    })
+
     describe('admin check', () => {
         test('addoracle', async () => {
             const action = contracts.epoch.actions.addoracle([bob]).send(alice)

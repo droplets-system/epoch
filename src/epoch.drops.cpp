@@ -242,6 +242,25 @@ vector<string> epoch::get_epoch_reveals(const uint64_t epoch)
    return reveals;
 }
 
+vector<checksum256> epoch::get_epoch_commits(const uint64_t epoch)
+{
+   const epoch_row     selected_epoch = get_epoch(epoch);
+   vector<checksum256> commits;
+
+   const commit_table _commits(get_self(), get_self().value);
+   auto               idx       = _commits.get_index<"epoch"_n>();
+   auto               itr_start = idx.lower_bound(epoch);
+   auto               itr_end   = idx.upper_bound(epoch);
+
+   for (auto itr = idx.begin(); itr != idx.end(); itr++) {
+      if (itr->epoch != epoch)
+         continue;
+      commits.push_back(itr->commit);
+   }
+
+   return commits;
+}
+
 [[eosio::action, eosio::read_only]] checksum256 epoch::computehash(const uint64_t epoch, const vector<string> reveals)
 {
    // Sort the reveal values alphebetically for consistency
@@ -268,12 +287,11 @@ void epoch::complete_epoch(const uint64_t epoch, const checksum256 epoch_seed)
 
 void epoch::ensure_epoch_reveal(const uint64_t epoch)
 {
-   const epoch_row      selected_epoch = get_epoch(epoch);
-   const vector<string> reveals        = get_epoch_reveals(epoch);
+   const epoch_row           selected_epoch = get_epoch(epoch);
+   const vector<checksum256> commits        = get_epoch_commits(epoch);
+   const vector<string>      reveals        = get_epoch_reveals(epoch);
 
-   //    check(false, "epoch::ensure_epoch_reveal: " + to_string(reveals.size()) + " / " +
-   //                    to_string(selected_epoch.oracles.size()) + " reveals");
-   if (reveals.size() == selected_epoch.oracles.size()) {
+   if (reveals.size() == commits.size()) {
       const auto seed = computehash(epoch, reveals);
       complete_epoch(epoch, seed);
       cleanup_epoch(epoch, selected_epoch.oracles);
