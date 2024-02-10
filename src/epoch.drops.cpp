@@ -58,6 +58,25 @@ namespace dropssystem {
    ensure_epoch_reveal(epoch);
 }
 
+[[eosio::action]] void epoch::forcereveal(const uint64_t epoch, string salt)
+{
+   require_auth(get_self());
+   check_is_enabled();
+
+   const uint64_t current_epoch_height = get_current_epoch_height();
+   check(epoch < current_epoch_height, "Epoch (" + to_string(epoch) + ") has not completed.");
+
+   const epoch_row selected_epoch = get_epoch(epoch);
+
+   // Add the salt to the existing oracle reveals
+   vector<string> reveals = get_epoch_reveals(epoch);
+   reveals.push_back(salt);
+
+   const auto seed = computehash(epoch, reveals);
+   complete_epoch(epoch, seed);
+   cleanup_epoch(epoch, selected_epoch.oracles);
+}
+
 void epoch::check_is_enabled()
 {
    epoch::state_table _state(get_self(), get_self().value);

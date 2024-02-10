@@ -473,6 +473,20 @@ describe(core_contract, () => {
                 )
             ).toBeTrue()
         })
+        test('faulty oracle commits but doesnt reveal', async () => {
+            await contracts.epoch.actions.addoracle([alice]).send()
+            await contracts.epoch.actions.addoracle([bob]).send()
+            await contracts.epoch.actions.init().send()
+
+            await contracts.epoch.actions.commit([alice, 1, mockCommit]).send(alice)
+            await contracts.epoch.actions.commit([bob, 1, mockCommit]).send(bob)
+            advanceTime(86400)
+            await contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(alice)
+            await contracts.epoch.actions.forcereveal([1, 'foo']).send()
+
+            const epoch = getEpoch(1n)
+            expect(epoch.seed.equals(revealHash(1, [mockReveal, 'foo']))).toBeTrue()
+        })
     })
 
     describe('admin check', () => {

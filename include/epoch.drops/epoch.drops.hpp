@@ -86,6 +86,9 @@ public:
    [[eosio::action]] void reveal(const name oracle, const uint64_t epoch, const string reveal);
    using reveal_action = eosio::action_wrapper<"reveal"_n, &epoch::reveal>;
 
+   [[eosio::action]] void forcereveal(const uint64_t epoch, const string salt);
+   using forcereveal_action = eosio::action_wrapper<"forcereveal"_n, &epoch::forcereveal>;
+
    [[eosio::action, eosio::read_only]] checksum256 computehash(const uint64_t epoch, const vector<string> reveals);
    using computehash_action = eosio::action_wrapper<"computehash"_n, &epoch::computehash>;
 
@@ -194,21 +197,22 @@ public:
 private:
    void check_is_enabled();
 
-   epoch::epoch_row advance_epoch();
-   void             ensure_epoch_advance(const uint64_t epoch);
-   void             ensure_epoch_reveal(const uint64_t epoch);
-   void             cleanup_epoch(const uint64_t epoch, const vector<name> oracles);
-   void             remove_oracle_commit(const uint64_t epoch, const name oracle);
-   void             remove_oracle_reveal(const uint64_t epoch, const name oracle);
-   bool             oracle_has_committed(const name oracle, const uint64_t epoch);
-   bool             oracle_has_revealed(const name oracle, const uint64_t epoch);
-   void             complete_epoch(const uint64_t epoch, const checksum256 epoch_seed);
-   vector<name>     get_active_oracles();
-   vector<string>   get_epoch_reveals(const uint64_t epoch);
-   uint64_t         get_current_epoch_height();
-   epoch_row        get_epoch(const uint64_t epoch);
-   reveal_row       get_reveal(const name oracle, const uint64_t epoch);
-   commit_row       get_commit(name const oracle, const uint64_t epoch);
+   epoch::epoch_row    advance_epoch();
+   void                ensure_epoch_advance(const uint64_t epoch);
+   void                ensure_epoch_reveal(const uint64_t epoch);
+   void                cleanup_epoch(const uint64_t epoch, const vector<name> oracles);
+   void                remove_oracle_commit(const uint64_t epoch, const name oracle);
+   void                remove_oracle_reveal(const uint64_t epoch, const name oracle);
+   bool                oracle_has_committed(const name oracle, const uint64_t epoch);
+   bool                oracle_has_revealed(const name oracle, const uint64_t epoch);
+   void                complete_epoch(const uint64_t epoch, const checksum256 epoch_seed);
+   vector<name>        get_active_oracles();
+   vector<string>      get_epoch_reveals(const uint64_t epoch);
+   vector<checksum256> get_epoch_commits(const uint64_t epoch);
+   uint64_t            get_current_epoch_height();
+   epoch_row           get_epoch(const uint64_t epoch);
+   reveal_row          get_reveal(const name oracle, const uint64_t epoch);
+   commit_row          get_commit(name const oracle, const uint64_t epoch);
 
    void emplace_commit(const uint64_t epoch, const name oracle, const checksum256 commit);
    void emplace_reveal(const uint64_t epoch, const name oracle, const string reveal);
