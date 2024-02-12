@@ -390,6 +390,26 @@ void epoch::ensure_epoch_reveal(const uint64_t epoch)
 
 [[eosio::action, eosio::read_only]] uint64_t epoch::getepoch() { return get_current_epoch_height(); }
 
+[[eosio::action, eosio::read_only]] epoch::epoch_info epoch::getepochinfo(const optional<uint64_t> epoch)
+{
+   uint64_t epoch_height = get_current_epoch_height();
+   if (epoch.has_value()) {
+      epoch_height = *epoch;
+   }
+
+   const dropssystem::epoch::epoch_table _epoch("epoch.drops"_n, "epoch.drops"_n.value);
+   dropssystem::epoch::state_table       _state("epoch.drops"_n, "epoch.drops"_n.value);
+
+   // Retrieve the current epoch being used (current - 1)
+   auto       state     = _state.get();
+   const auto epoch_row = get_epoch(epoch_height);
+
+   block_timestamp start = derive_epoch_start(state.genesis, state.duration, epoch_height);
+   block_timestamp end   = block_timestamp(start.to_time_point() + seconds(state.duration));
+
+   return {epoch_height, start, end, epoch_row.seed, epoch_row.oracles};
+}
+
 [[eosio::action, eosio::read_only]] vector<name> epoch::getoracles()
 {
    const uint64_t         current_epoch_height = get_current_epoch_height();

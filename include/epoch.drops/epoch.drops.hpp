@@ -92,8 +92,20 @@ public:
    [[eosio::action, eosio::read_only]] checksum256 computehash(const uint64_t epoch, const vector<string> reveals);
    using computehash_action = eosio::action_wrapper<"computehash"_n, &epoch::computehash>;
 
+   struct epoch_info
+   {
+      uint64_t        epoch;
+      block_timestamp start;
+      block_timestamp end;
+      checksum256     seed;
+      vector<name>    oracles;
+   };
+
    [[eosio::action, eosio::read_only]] uint64_t getepoch();
    using getepoch_action = eosio::action_wrapper<"getepoch"_n, &epoch::getepoch>;
+
+   [[eosio::action, eosio::read_only]] epoch_info getepochinfo(const optional<uint64_t> epoch);
+   using getepochinfo_action = eosio::action_wrapper<"getepochinfo"_n, &epoch::getepochinfo>;
 
    [[eosio::action, eosio::read_only]] vector<name> getoracles();
    using getoracles_action = eosio::action_wrapper<"getoracles"_n, &epoch::getoracles>;
