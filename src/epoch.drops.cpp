@@ -417,38 +417,4 @@ void epoch::ensure_epoch_reveal(const uint64_t epoch)
    return _epoch.oracles;
 }
 
-[[eosio::action]] void epoch::wipe()
-{
-   require_auth(get_self());
-
-   epoch::state_table _state(get_self(), get_self().value);
-   _state.remove();
-   auto state = _state.get_or_default();
-   _state.set(state, get_self());
-
-   epoch::commit_table commits(get_self(), get_self().value);
-   auto                commit_itr = commits.begin();
-   while (commit_itr != commits.end()) {
-      commit_itr = commits.erase(commit_itr);
-   }
-
-   epoch::epoch_table epochs(get_self(), get_self().value);
-   auto               epoch_itr = epochs.begin();
-   while (epoch_itr != epochs.end()) {
-      epoch_itr = epochs.erase(epoch_itr);
-   }
-
-   epoch::reveal_table reveals(get_self(), get_self().value);
-   auto                reveal_itr = reveals.begin();
-   while (reveal_itr != reveals.end()) {
-      reveal_itr = reveals.erase(reveal_itr);
-   }
-
-   epoch::oracle_table oracles(get_self(), get_self().value);
-   auto                oracle_itr = oracles.begin();
-   while (oracle_itr != oracles.end()) {
-      oracle_itr = oracles.erase(oracle_itr);
-   }
-}
-
 } // namespace dropssystem

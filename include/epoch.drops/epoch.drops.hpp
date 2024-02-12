@@ -240,10 +240,6 @@ public:
    // @debug
    [[eosio::action]] void
    cleartable(const name table_name, const optional<name> scope, const optional<uint64_t> max_rows);
-
-   [[eosio::action]] void wipe();
-   using wipe_action = eosio::action_wrapper<"wipe"_n, &epoch::wipe>;
-
 #endif
 
 private:
