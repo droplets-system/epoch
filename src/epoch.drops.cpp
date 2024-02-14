@@ -44,18 +44,36 @@ namespace dropssystem {
 
    const commit_row  _commit     = get_commit(oracle, epoch);
    const checksum256 commit_hash = _commit.commit;
-   const auto        commit_arr  = commit_hash.extract_as_byte_array();
+   const string      commit_str  = checksum256_to_string(commit_hash);
 
    const checksum256 reveal_hash = sha256(reveal.c_str(), reveal.length());
-   const auto        reveal_arr  = reveal_hash.extract_as_byte_array();
+   const string      reveal_str  = checksum256_to_string(reveal_hash);
 
-   check(reveal_hash == commit_hash,
-         "Reveal value '" + reveal + "' hashes to '" + hexStr(reveal_arr.data(), reveal_arr.size()) +
-            "' which does not match commit value '" + hexStr(commit_arr.data(), commit_arr.size()) + "'.");
+   check(reveal_hash == commit_hash, "Reveal value '" + reveal + "' hashes to '" + reveal_str +
+                                        "' which does not match commit value '" + commit_str + "'.");
 
    emplace_reveal(epoch, oracle, reveal);
 
    ensure_epoch_reveal(epoch);
+}
+
+[[eosio::action]] void epoch::forcereveal(const uint64_t epoch, string salt)
+{
+   require_auth(get_self());
+   check_is_enabled();
+
+   const uint64_t current_epoch_height = get_current_epoch_height();
+   check(epoch < current_epoch_height, "Epoch (" + to_string(epoch) + ") has not completed.");
+
+   const epoch_row selected_epoch = get_epoch(epoch);
+
+   // Add the salt to the existing oracle reveals
+   vector<string> reveals = get_epoch_reveals(epoch);
+   reveals.push_back(salt);
+
+   const auto seed = computehash(epoch, reveals);
+   complete_epoch(epoch, seed);
+   cleanup_epoch(epoch, selected_epoch.oracles);
 }
 
 void epoch::check_is_enabled()
@@ -99,7 +117,7 @@ bool epoch::oracle_has_revealed(const name oracle, const uint64_t epoch)
 void epoch::emplace_commit(const uint64_t epoch, const name oracle, const checksum256 commit)
 {
    epoch::commit_table commits(get_self(), get_self().value);
-   commits.emplace(get_self(), [&](auto& row) {
+   commits.emplace(oracle, [&](auto& row) {
       row.id     = commits.available_primary_key();
       row.epoch  = epoch;
       row.oracle = oracle;
@@ -110,7 +128,7 @@ void epoch::emplace_commit(const uint64_t epoch, const name oracle, const checks
 void epoch::emplace_reveal(const uint64_t epoch, const name oracle, const string reveal)
 {
    epoch::reveal_table reveals(get_self(), get_self().value);
-   reveals.emplace(get_self(), [&](auto& row) {
+   reveals.emplace(oracle, [&](auto& row) {
       row.id     = reveals.available_primary_key();
       row.epoch  = epoch;
       row.oracle = oracle;
@@ -154,16 +172,14 @@ epoch::epoch_row epoch::advance_epoch()
    const vector<name> oracles = get_active_oracles();
 
    epochs.emplace(get_self(), [&](auto& row) {
-      row.epoch     = current_epoch_height;
-      row.oracles   = oracles;
-      row.completed = 0;
+      row.epoch   = current_epoch_height;
+      row.oracles = oracles;
    });
 
    // Return the next epoch
    return {
       current_epoch_height, // epoch
       oracles,              // oracles
-      0                     // completed
    };
 }
 
@@ -197,47 +213,106 @@ epoch::commit_row epoch::get_commit(const name oracle, const uint64_t epoch)
    return *commit_itr;
 }
 
-void epoch::ensure_epoch_reveal(const uint64_t epoch)
+void epoch::remove_oracle_commit(const uint64_t epoch, const name oracle)
 {
-   vector<name> oracles_revealed;
+   epoch::commit_table _commits(get_self(), get_self().value);
+   auto                commit_idx = _commits.get_index<"epochoracle"_n>();
+   auto                commit_itr = commit_idx.find(((uint128_t)oracle.value << 64) + epoch);
+   if (commit_itr != commit_idx.end()) {
+      commit_idx.erase(commit_itr);
+   }
+}
 
-   epoch::epoch_table _epoch(get_self(), get_self().value);
-   const auto         epoch_itr = _epoch.find(epoch);
-   check(epoch_itr != _epoch.end(), "Epoch2 " + to_string(epoch) + " does not exist.");
+void epoch::remove_oracle_reveal(const uint64_t epoch, const name oracle)
+{
+   epoch::reveal_table _reveals(get_self(), get_self().value);
+   auto                reveal_idx = _reveals.get_index<"epochoracle"_n>();
+   auto                reveal_itr = reveal_idx.find(((uint128_t)oracle.value << 64) + epoch);
+   if (reveal_itr != reveal_idx.end()) {
+      reveal_idx.erase(reveal_itr);
+   }
+}
 
-   const reveal_table reveals(get_self(), get_self().value);
-   auto               oracle_reveals = reveals.get_index<"epochoracle"_n>();
-   for (name oracle : epoch_itr->oracles) {
-      auto completed_reveals_itr = oracle_reveals.find(((uint128_t)oracle.value << 64) + epoch);
-      if (completed_reveals_itr != oracle_reveals.end()) {
-         oracles_revealed.push_back(oracle);
-      }
+void epoch::cleanup_epoch(const uint64_t epoch, const vector<name> oracles)
+{
+   for (const name oracle : oracles) {
+      remove_oracle_commit(epoch, oracle);
+      remove_oracle_reveal(epoch, oracle);
+   }
+}
+
+vector<string> epoch::get_epoch_reveals(const uint64_t epoch)
+{
+   const epoch_row selected_epoch = get_epoch(epoch);
+   vector<string>  reveals;
+
+   const reveal_table _reveals(get_self(), get_self().value);
+   auto               idx       = _reveals.get_index<"epoch"_n>();
+   auto               itr_start = idx.lower_bound(epoch);
+   auto               itr_end   = idx.upper_bound(epoch);
+
+   for (auto itr = idx.begin(); itr != idx.end(); itr++) {
+      if (itr->epoch != epoch)
+         continue;
+      reveals.push_back(itr->reveal);
    }
 
-   if (oracles_revealed.size() == epoch_itr->oracles.size()) {
+   return reveals;
+}
 
-      // Accumulator for all reveal values
-      vector<string> reveals;
-      for (const name oracle_name : oracles_revealed) {
-         const auto reveal = get_reveal(oracle_name, epoch);
-         reveals.push_back(reveal.reveal);
-      }
+vector<checksum256> epoch::get_epoch_commits(const uint64_t epoch)
+{
+   const epoch_row     selected_epoch = get_epoch(epoch);
+   vector<checksum256> commits;
 
-      // Sort the reveal values alphebetically for consistency
-      sort(reveals.begin(), reveals.end());
+   const commit_table _commits(get_self(), get_self().value);
+   auto               idx       = _commits.get_index<"epoch"_n>();
+   auto               itr_start = idx.lower_bound(epoch);
+   auto               itr_end   = idx.upper_bound(epoch);
 
-      // Combine the epoch, drops, and reveals into a single string
-      string result = to_string(epoch);
-      for (const auto& reveal : reveals)
-         result += reveal;
+   for (auto itr = idx.begin(); itr != idx.end(); itr++) {
+      if (itr->epoch != epoch)
+         continue;
+      commits.push_back(itr->commit);
+   }
 
-      // Generate the sha256 value of the combined string
-      const auto epoch_seed = sha256(result.c_str(), result.length());
+   return commits;
+}
 
-      _epoch.modify(epoch_itr, get_self(), [&](auto& row) {
-         row.completed = 1;
-         row.seed      = epoch_seed;
-      });
+[[eosio::action, eosio::read_only]] checksum256 epoch::computehash(const uint64_t epoch, const vector<string> reveals)
+{
+   // Sort the reveal values alphebetically for consistency
+   vector<string> sorted_reveals = reveals;
+   sort(sorted_reveals.begin(), sorted_reveals.end());
+
+   // Combine the epoch, drops, and reveals into a single string
+   string result = to_string(epoch);
+   for (const auto& reveal : sorted_reveals)
+      result += reveal;
+
+   return sha256(result.c_str(), result.length());
+}
+
+void epoch::complete_epoch(const uint64_t epoch, const checksum256 epoch_seed)
+{
+   epoch::epoch_table _epoch(get_self(), get_self().value);
+   auto&              epoch_row = _epoch.get(epoch, "Epoch not found");
+   _epoch.modify(epoch_row, get_self(), [&](auto& row) {
+      row.oracles = {};
+      row.seed    = epoch_seed;
+   });
+}
+
+void epoch::ensure_epoch_reveal(const uint64_t epoch)
+{
+   const epoch_row           selected_epoch = get_epoch(epoch);
+   const vector<checksum256> commits        = get_epoch_commits(epoch);
+   const vector<string>      reveals        = get_epoch_reveals(epoch);
+
+   if (reveals.size() == commits.size()) {
+      const auto seed = computehash(epoch, reveals);
+      complete_epoch(epoch, seed);
+      cleanup_epoch(epoch, selected_epoch.oracles);
    }
 }
 
@@ -286,9 +361,8 @@ void epoch::ensure_epoch_reveal(const uint64_t epoch)
    // Add the initial epoch row to the oracle contract
    epoch::epoch_table epochs(get_self(), get_self().value);
    epochs.emplace(get_self(), [&](auto& row) {
-      row.epoch     = 1;
-      row.oracles   = oracles;
-      row.completed = 0;
+      row.epoch   = 1;
+      row.oracles = oracles;
    });
 }
 
@@ -316,45 +390,31 @@ void epoch::ensure_epoch_reveal(const uint64_t epoch)
 
 [[eosio::action, eosio::read_only]] uint64_t epoch::getepoch() { return get_current_epoch_height(); }
 
+[[eosio::action, eosio::read_only]] epoch::epoch_info epoch::getepochinfo(const optional<uint64_t> epoch)
+{
+   uint64_t epoch_height = get_current_epoch_height();
+   if (epoch.has_value()) {
+      epoch_height = *epoch;
+   }
+
+   const dropssystem::epoch::epoch_table _epoch("epoch.drops"_n, "epoch.drops"_n.value);
+   dropssystem::epoch::state_table       _state("epoch.drops"_n, "epoch.drops"_n.value);
+
+   // Retrieve the current epoch being used (current - 1)
+   auto       state     = _state.get();
+   const auto epoch_row = get_epoch(epoch_height);
+
+   block_timestamp start = derive_epoch_start(state.genesis, state.duration, epoch_height);
+   block_timestamp end   = block_timestamp(start.to_time_point() + seconds(state.duration));
+
+   return {epoch_height, start, end, epoch_row.seed, epoch_row.oracles};
+}
+
 [[eosio::action, eosio::read_only]] vector<name> epoch::getoracles()
 {
    const uint64_t         current_epoch_height = get_current_epoch_height();
    const epoch::epoch_row _epoch               = get_epoch(current_epoch_height);
    return _epoch.oracles;
-}
-
-[[eosio::action]] void epoch::wipe()
-{
-   require_auth(get_self());
-
-   epoch::state_table _state(get_self(), get_self().value);
-   _state.remove();
-   auto state = _state.get_or_default();
-   _state.set(state, get_self());
-
-   epoch::commit_table commits(get_self(), get_self().value);
-   auto                commit_itr = commits.begin();
-   while (commit_itr != commits.end()) {
-      commit_itr = commits.erase(commit_itr);
-   }
-
-   epoch::epoch_table epochs(get_self(), get_self().value);
-   auto               epoch_itr = epochs.begin();
-   while (epoch_itr != epochs.end()) {
-      epoch_itr = epochs.erase(epoch_itr);
-   }
-
-   epoch::reveal_table reveals(get_self(), get_self().value);
-   auto                reveal_itr = reveals.begin();
-   while (reveal_itr != reveals.end()) {
-      reveal_itr = reveals.erase(reveal_itr);
-   }
-
-   epoch::oracle_table oracles(get_self(), get_self().value);
-   auto                oracle_itr = oracles.begin();
-   while (oracle_itr != oracles.end()) {
-      oracle_itr = oracles.erase(oracle_itr);
-   }
 }
 
 } // namespace dropssystem

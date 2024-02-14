@@ -110,12 +110,17 @@ function getOracles(): EpochContract.Types.oracle_row[] {
         .map((row) => EpochContract.Types.oracle_row.from(row))
 }
 
+function revealHash(epoch: number, secrets: string[]) {
+    const combined = [epoch, ...secrets.sort()].join('')
+    return Checksum256.hash(Bytes.from(combined, 'utf8').array).hexString
+}
+
 // const ERROR_INVALID_MEMO = `eosio_assert_message: Invalid transfer memo. (ex: "<amount>,<data>")`
 // const ERROR_SYSTEM_DISABLED = 'eosio_assert_message: Drops system is disabled.'
 
 const datetime = new Date('2024-01-29T00:00:00.000')
 function advanceTime(seconds: number) {
-    const newDate = new Date(datetime.getTime() + seconds * 1000)
+    const newDate = new Date(blockchain.timestamp.toMilliseconds() + seconds * 1000)
     blockchain.setTime(TimePointSec.from(newDate))
 }
 
@@ -137,6 +142,17 @@ describe(core_contract, () => {
         await contracts.epoch.actions.wipe().send()
     })
 
+    test('hash function match', async () => {
+        const reveals = [
+            '6ebbcfd600cb99737f3329aa4545ad6bf1cc62a86d9aaaebf6cc197c49b7064e',
+            '764c433a1b07827415b263d47ff468bc0a6b35754c878176038cf8dd2fabc90b',
+            '4086e35e0554c61ae225e71fd84327902b3da16fd54aa0cc186a7b1bf56578ab',
+        ]
+        const expected = '7f1c43edefe38ea54d678f3341cc12a9673f8c4c78fa1cdf3203f751deb07239'
+        const actual = revealHash(146, reveals)
+        expect(expected).toBe(actual)
+    })
+
     test('state::default', async () => {
         expect(getState()).toBeStruct(defaultState)
         expect(() => getEpoch(1n)).toThrow('Epoch not found')
@@ -149,7 +165,6 @@ describe(core_contract, () => {
             epoch: 1n,
             seed: '0000000000000000000000000000000000000000000000000000000000000000',
             oracles: [alice],
-            completed: false,
         })
     })
 
@@ -273,11 +288,16 @@ describe(core_contract, () => {
             await contracts.epoch.actions.addoracle([alice]).send()
             await contracts.epoch.actions.init().send()
         })
-        test('success', async () => {
+        test('single oracle reveal', async () => {
+            await contracts.epoch.actions.wipe().send()
+            await contracts.epoch.actions.addoracle([alice]).send()
+            await contracts.epoch.actions.addoracle([bob]).send()
+            await contracts.epoch.actions.init().send()
+
             await contracts.epoch.actions.commit([alice, 1, mockCommit]).send(alice)
+            await contracts.epoch.actions.commit([bob, 1, mockCommit]).send(bob)
 
             advanceTime(86400)
-
             await contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(alice)
 
             const reveals = getReveals()
@@ -286,12 +306,76 @@ describe(core_contract, () => {
             const epoch = getEpoch(1n)
             expect(
                 epoch.seed.equals(
-                    'aa64858f9aef574443d0595ef57665d4252475b3f9a5a484c40654401a4116e5'
+                    '0000000000000000000000000000000000000000000000000000000000000000'
+                )
+            ).toBeTrue()
+        })
+        test('reveal cleans up after epoch completes', async () => {
+            await contracts.epoch.actions.wipe().send()
+            await contracts.epoch.actions.addoracle([alice]).send()
+            await contracts.epoch.actions.addoracle([bob]).send()
+            await contracts.epoch.actions.init().send()
+
+            // Commit Epoch 1
+            await contracts.epoch.actions.commit([alice, 1, mockCommit]).send(alice)
+            await contracts.epoch.actions.commit([bob, 1, mockCommit]).send(bob)
+            advanceTime(86400)
+
+            // Partial reveal Epoch 1
+            await contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(alice)
+
+            // Commit Epoch 2
+            await contracts.epoch.actions.commit([alice, 2, mockCommit]).send(alice)
+            await contracts.epoch.actions.commit([bob, 2, mockCommit]).send(bob)
+            advanceTime(86400)
+
+            // Partial reveal Epoch 2
+            await contracts.epoch.actions.reveal([alice, 2, mockReveal]).send(alice)
+
+            // Commit Epoch 3
+            await contracts.epoch.actions.commit([alice, 3, mockCommit]).send(alice)
+            await contracts.epoch.actions.commit([bob, 3, mockCommit]).send(bob)
+            advanceTime(86400)
+
+            // Partial reveal Epoch 3
+            await contracts.epoch.actions.reveal([alice, 3, mockReveal]).send(alice)
+
+            // Ensure all commits from epoch 1, 2, and 3 exist
+            const commits = getCommits()
+            expect(commits.length).toBe(6)
+
+            // Ensure all partial reveals from epoch 1, 2, and 3 exist
+            const reveals = getReveals()
+            expect(reveals.length).toBe(3)
+
+            // Finish revealing Epoch 2
+            await contracts.epoch.actions.reveal([bob, 2, mockReveal]).send(bob)
+
+            // Ensure Epoch 1 and 3 still exist, and 2 has been cleaned up
+            const commitsAfter = getCommits()
+            expect(commitsAfter.length).toBe(4)
+
+            const revealsAfter = getReveals()
+            expect(revealsAfter.length).toBe(2)
+
+            const epoch1 = getEpoch(1n)
+            expect(
+                epoch1.seed.equals(
+                    '0000000000000000000000000000000000000000000000000000000000000000'
+                )
+            ).toBeTrue()
+
+            const epoch2 = getEpoch(2n)
+            expect(epoch2.seed.equals(revealHash(2, [mockReveal, mockReveal]))).toBeTrue()
+
+            const epoch3 = getEpoch(3n)
+            expect(
+                epoch3.seed.equals(
+                    '0000000000000000000000000000000000000000000000000000000000000000'
                 )
             ).toBeTrue()
         })
         test('does not reveal until all oracles submit', async () => {
-            // reinitialize with two oracles
             await contracts.epoch.actions.wipe().send()
             await contracts.epoch.actions.addoracle([alice]).send()
             await contracts.epoch.actions.addoracle([bob]).send()
@@ -308,7 +392,6 @@ describe(core_contract, () => {
             expect(reveals.length).toBe(1)
 
             const epoch = getEpoch(1n)
-            expect(epoch.completed.equals(0)).toBeTrue()
             expect(
                 epoch.seed.equals(
                     '0000000000000000000000000000000000000000000000000000000000000000'
@@ -318,15 +401,10 @@ describe(core_contract, () => {
             await contracts.epoch.actions.reveal([bob, 1, mockReveal]).send(bob)
 
             const revealsAfter = getReveals()
-            expect(revealsAfter.length).toBe(2)
+            expect(revealsAfter.length).toBe(0)
 
             const epochAfter = getEpoch(1n)
-            expect(epochAfter.completed.equals(1)).toBeTrue()
-            expect(
-                epochAfter.seed.equals(
-                    '2202d9f6ff083b8061e9741c7a03392ded42acbfc563ef1ad400386af8f38ff5'
-                )
-            ).toBeTrue()
+            expect(epochAfter.seed.equals(revealHash(1, [mockReveal, mockReveal]))).toBeTrue()
         })
 
         describe('errors', () => {
@@ -349,7 +427,13 @@ describe(core_contract, () => {
                 expect(action).rejects.toThrow('eosio_assert_message: Epoch (1) has not completed.')
             })
             test('oracle already revealed', async () => {
+                await contracts.epoch.actions.wipe().send()
+                await contracts.epoch.actions.addoracle([alice]).send()
+                await contracts.epoch.actions.addoracle([bob]).send()
+                await contracts.epoch.actions.init().send()
+
                 await contracts.epoch.actions.commit([alice, 1, mockCommit]).send(alice)
+                await contracts.epoch.actions.commit([bob, 1, mockCommit]).send(bob)
                 advanceTime(86400)
                 await contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(alice)
                 const action = contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(alice)
@@ -369,6 +453,39 @@ describe(core_contract, () => {
                 const action = contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(bob)
                 expect(action).rejects.toThrow('missing required authority alice')
             })
+        })
+    })
+
+    describe('edge cases', () => {
+        test('reveals despite missing oracle', async () => {
+            await contracts.epoch.actions.addoracle([alice]).send()
+            await contracts.epoch.actions.addoracle([bob]).send()
+            await contracts.epoch.actions.init().send()
+
+            await contracts.epoch.actions.commit([alice, 1, mockCommit]).send(alice)
+            advanceTime(86400)
+            await contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(alice)
+
+            const epoch = getEpoch(1n)
+            expect(
+                epoch.seed.equals(
+                    'aa64858f9aef574443d0595ef57665d4252475b3f9a5a484c40654401a4116e5'
+                )
+            ).toBeTrue()
+        })
+        test('faulty oracle commits but doesnt reveal', async () => {
+            await contracts.epoch.actions.addoracle([alice]).send()
+            await contracts.epoch.actions.addoracle([bob]).send()
+            await contracts.epoch.actions.init().send()
+
+            await contracts.epoch.actions.commit([alice, 1, mockCommit]).send(alice)
+            await contracts.epoch.actions.commit([bob, 1, mockCommit]).send(bob)
+            advanceTime(86400)
+            await contracts.epoch.actions.reveal([alice, 1, mockReveal]).send(alice)
+            await contracts.epoch.actions.forcereveal([1, 'foo']).send()
+
+            const epoch = getEpoch(1n)
+            expect(epoch.seed.equals(revealHash(1, [mockReveal, 'foo']))).toBeTrue()
         })
     })
 

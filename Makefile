@@ -25,6 +25,10 @@ build/dir:
 clean:
 	rm -rf build
 
+drops/include:
+	cp -R ../drops/include/drops ./include
+	cp -R ../drops/include/eosio.system ./include
+
 devnet: build/debug
 	cleos -u $(DEVNET_NODE_URL) set contract $(DEVNET_ACCOUNT_NAME) \
 		build/ ${CONTRACT_NAME}.wasm ${CONTRACT_NAME}.abi
@@ -37,7 +41,6 @@ mainnet: build/production
 	cleos -u $(MAINNET_NODE_URL) set contract $(MAINNET_ACCOUNT_NAME) \
 		build/ ${CONTRACT_NAME}.wasm ${CONTRACT_NAME}.abi
 
-.PHONY: test
 test: build/debug node_modules build/epoch.drops.ts init/codegen
 	bun test
 
