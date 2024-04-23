@@ -67,6 +67,10 @@ namespace dropssystem {
 
    const epoch_row selected_epoch = get_epoch(epoch);
 
+   check(checksum256_to_string(selected_epoch.seed) ==
+            "0000000000000000000000000000000000000000000000000000000000000000",
+         "Epoch has already been revealed and cannot be forced.");
+
    // Add the salt to the existing oracle reveals
    vector<string> reveals = get_epoch_reveals(epoch);
    reveals.push_back(salt);
