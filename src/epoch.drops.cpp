@@ -313,7 +313,8 @@ void epoch::ensure_epoch_reveal(const uint64_t epoch)
    const vector<checksum256> commits        = get_epoch_commits(epoch);
    const vector<string>      reveals        = get_epoch_reveals(epoch);
 
-   if (reveals.size() == commits.size()) {
+   if (reveals.size() == commits.size() && checksum256_to_string(selected_epoch.seed) ==
+                                              "0000000000000000000000000000000000000000000000000000000000000000") {
       const auto seed = computehash(epoch, reveals);
       complete_epoch(epoch, seed);
       cleanup_epoch(epoch, selected_epoch.oracles);
